@@ -2,7 +2,7 @@ import os
 from dotenv import load_dotenv
 import requests
 
-load_dotenv()  # Загружаем env
+load_dotenv()
 
 SUPERJOB_API_KEY = os.getenv("API_SUPERJOB_KEY")
 SUPERJOB_URL = "https://api.superjob.ru/2.0/vacancies/"
