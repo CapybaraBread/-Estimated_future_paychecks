@@ -1,14 +1,6 @@
 import os
-from dotenv import load_dotenv
 import requests
-
-load_dotenv()
-
-SUPERJOB_API_KEY = os.getenv("API_SUPERJOB_KEY")
-SUPERJOB_URL = "https://api.superjob.ru/2.0/vacancies/"
-
-
-# HH.ru
+from dotenv import load_dotenv
 
 
 def get_hh_vacancies(keyword, area=1, per_page=100):
@@ -18,56 +10,53 @@ def get_hh_vacancies(keyword, area=1, per_page=100):
     return resp.json()
 
 
-def predict_rub_salary_for_hh(vac):
-    sal = vac.get("salary")
-    if not sal or sal.get("currency") != "RUR":
+def predict_rub_salary_for_hh(vacancy):
+    salary_data = vacancy.get("salary")
+    if not salary_data or salary_data.get("currency") != "RUR":
         return None
-    frm = sal.get("from")
-    to = sal.get("to")
-    if frm and to:
-        return (frm + to) / 2
-    if frm:
-        return frm * 1.2
-    if to:
-        return to * 0.8
+    salary_from = salary_data.get("from")
+    salary_to = salary_data.get("to")
+    if salary_from and salary_to:
+        return (salary_from + salary_to) / 2
+    if salary_from:
+        return salary_from * 1.2
+    if salary_to:
+        return salary_to * 0.8
     return None
 
 
-def get_hh_statistics(langs):
-    stats = {}
-    for lang in langs:
-        data = get_hh_vacancies(lang)
+def get_hh_statistics(languages):
+    statistics = {}
+    for language in languages:
+        data = get_hh_vacancies(language)
         found = data.get("found", 0)
-        items = data.get("items", [])
-        total, cnt = 0, 0
-        for item in items:
-            s = predict_rub_salary_for_hh(item)
-            if s is not None:
-                total += s
-                cnt += 1
-        avg = int(total / cnt) if cnt else 0
-        stats[lang] = {
+        vacancies = data.get("items", [])
+        total_salary, processed_count = 0, 0
+        for vacancy in vacancies:
+            predicted_salary = predict_rub_salary_for_hh(vacancy)
+            if predicted_salary:
+                total_salary += predicted_salary
+                processed_count += 1
+        average_salary = int(total_salary / processed_count) if processed_count else 0
+        statistics[language] = {
             "vacancies_found": found,
-            "vacancies_processed": cnt,
-            "average_salary": avg
+            "vacancies_processed": processed_count,
+            "average_salary": average_salary
         }
-    return stats
+    return statistics
 
 
-# SuperJob
-
-
-def predict_rub_salary_for_superJob(vac):
-    pf = vac.get("payment_from")
-    pt = vac.get("payment_to")
-    if pf is None and pt is None:
+def predict_rub_salary_for_superJob(vacancy):
+    payment_from = vacancy.get("payment_from")
+    payment_to = vacancy.get("payment_to")
+    if not payment_from and not payment_to:
         return None
-    if pf is not None and pt is not None:
-        return (pf + pt) / 2
-    if pf is not None:
-        return pf * 1.2
-    if pt is not None:
-        return pt * 0.8
+    if payment_from and payment_to:
+        return (payment_from + payment_to) / 2
+    if payment_from:
+        return payment_from * 1.2
+    if payment_to:
+        return payment_to * 0.8
 
 
 def get_superjob_vacancies(keyword, town=4, count=100):
@@ -78,28 +67,25 @@ def get_superjob_vacancies(keyword, town=4, count=100):
     return resp.json()
 
 
-def get_superjob_statistics(langs):
+def get_superjob_statistics(languages):
     stats = {}
-    for lang in langs:
-        data = get_superjob_vacancies(lang)
+    for language in languages:
+        data = get_superjob_vacancies(language)
         found = data.get("total", 0)
-        vacs = data.get("objects", [])
-        total, cnt = 0, 0
-        for vac in vacs:
-            s = predict_rub_salary_for_superJob(vac)
-            if s is not None:
-                total += s
-                cnt += 1
-        avg = int(total / cnt) if cnt else 0
-        stats[lang] = {
+        vacancies = data.get("objects", [])
+        total_salary, processed_count = 0, 0
+        for vacancy in vacancies:
+            predicted_salary = predict_rub_salary_for_superJob(vacancy)
+            if predicted_salary:
+                total_salary += predicted_salary
+                processed_count += 1
+        average_salary = int(total_salary / processed_count) if processed_count else 0
+        stats[language] = {
             "vacancies_found": found,
-            "vacancies_processed": cnt,
-            "average_salary": avg
+            "vacancies_processed": processed_count,
+            "average_salary": average_salary
         }
     return stats
-
-
-# Вывод таблицы
 
 
 def print_statistics_table(stats, title="Job Stats"):
@@ -110,24 +96,40 @@ def print_statistics_table(stats, title="Job Stats"):
         "Средняя зарплата"
     ]
     rows = [headers]
-    for lang, data in stats.items():
-        rows.append([
-            lang,
-            data["vacancies_found"],
-            data["vacancies_processed"],
-            data["average_salary"]
-            ])
+    for language, language_stats in stats.items():
+        rows.append(
+            [
+                language,
+                language_stats["vacancies_found"],
+                language_stats["vacancies_processed"],
+                language_stats["average_salary"],
+            ]
+        )
     col_widths = [max(len(str(cell)) for cell in col) for col in zip(*rows)]
-    sep = "+" + "+".join("-" * (w + 2) for w in col_widths) + "+"
-    print(f"\n{title}\n" + sep)
-    for i, row in enumerate(rows):
-        print("| " + " | ".join(str(cell).ljust(col_widths[j]) for j, cell in enumerate(row)) + " |")
+    separator_inner = '+'.join('-' * (w + 2) for w in col_widths)
+    sep = f"+{separator_inner}+"
+    print(f"\n{title}\n{sep}")
+    for index, table_row in enumerate(rows):
+        row_str = ' | '.join(str(cell).ljust(col_widths[j]) for j, cell in enumerate(table_row))
+        print(f"| {row_str} |")
         print(sep)
 
 
-if __name__ == "__main__":
+def main():
+    global SUPERJOB_API_KEY, SUPERJOB_URL
+    load_dotenv()
+    SUPERJOB_API_KEY = os.getenv("API_SUPERJOB_KEY")
+    SUPERJOB_URL = "https://api.superjob.ru/2.0/vacancies/"
     langs = ["Python", "Java", "C#", "Go", "JavaScript", "1C"]
     hh_stats = get_hh_statistics(langs)
     print_statistics_table(hh_stats, title="HeadHunter Moscow")
     sj_stats = get_superjob_statistics(langs)
-    print_statistics_table(sj_stats, title="SuperJob Moscow")
+    print_statistics_table(
+        sj_stats,
+        title="SuperJob Moscow"
+    )
+
+
+if __name__ == "__main__":
+
+    main()
