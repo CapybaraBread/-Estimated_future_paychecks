@@ -3,7 +3,10 @@ import requests
 from dotenv import load_dotenv
 import time
 from terminaltables import SingleTable
+
 load_dotenv()
+SUPERJOB_API_KEY = os.getenv("API_SUPERJOB_KEY")
+SUPERJOB_URL = "https://api.superjob.ru/2.0/vacancies/"
 
 LANGUAGE_ALIASES = {
     "Go": ["Go", "Golang"],
@@ -17,7 +20,7 @@ LANGUAGE_ALIASES = {
 RUB_CODES = {"RUR", "RUB", "rub", "Rub", "rur"}
 
 def predict_rub_salary(salary_min, salary_max, currency=None):
-    if currency is not None and currency not in RUB_CODES:
+    if currency and currency not in RUB_CODES:
         return None
     if not salary_min and not salary_max:
         return None
@@ -37,51 +40,49 @@ def get_hh_vacancies(search_query, region_id=1, vacancies_per_page=100, page=0):
 
 def get_all_hh_vacancies(search_query, region_id=1, vacancies_per_page=100):
     page = 0
-    all_items = []
+    all_vacancies = []
     total_found = 0
     while True:
-        page_data = get_hh_vacancies(search_query, region_id=region_id, vacancies_per_page=vacancies_per_page, page=page)
+        hh_page_response = get_hh_vacancies(search_query, region_id=region_id, vacancies_per_page=vacancies_per_page, page=page)
         if page == 0:
-            total_found = page_data.get("found", 0)
-        items = page_data.get("items", [])
-        all_items.extend(items)
-        pages_total = page_data.get("pages")
-        if pages_total is None or page >= pages_total - 1:
+            total_found = hh_page_response.get("found", 0)
+        page_vacancies = hh_page_response.get("items", [])
+        all_vacancies.extend(page_vacancies)
+        pages_total = hh_page_response.get("pages")
+        if not pages_total or page >= pages_total - 1:
             break
         time.sleep(0.15)
         page += 1
-    return {"found": total_found, "items": all_items}
+    return total_found, all_vacancies
 
 def get_all_hh_vacancies_multi(queries, region_id=1, vacancies_per_page=100):
-    page_items = []
+    unique_vacancies = []
     seen_ids = set()
     total_found_sum = 0
-    for q in queries:
-        data = get_all_hh_vacancies(q, region_id=region_id, vacancies_per_page=vacancies_per_page)
-        total_found_sum += data.get("found", 0)
-        for item in data.get("items", []):
-            vid = item.get("id")
-            if vid not in seen_ids:
-                seen_ids.add(vid)
-                page_items.append(item)
-    return {"found": total_found_sum, "items": page_items}
+    for search_query in queries:
+        found_count, vacancies = get_all_hh_vacancies(search_query, region_id=region_id, vacancies_per_page=vacancies_per_page)
+        total_found_sum += found_count
+        for vacancy in vacancies:
+            vacancy_id = vacancy.get("id")
+            if vacancy_id not in seen_ids:
+                seen_ids.add(vacancy_id)
+                unique_vacancies.append(vacancy)
+    return total_found_sum, unique_vacancies
 
 def get_hh_statistics(languages):
     statistics = {}
     for language in languages:
         queries = LANGUAGE_ALIASES.get(language, [language])
-        vacancies_data = get_all_hh_vacancies_multi(queries)
-        total_found = vacancies_data.get("found", 0)
-        vacancy_list = vacancies_data.get("items", [])
+        total_found, vacancy_list = get_all_hh_vacancies_multi(queries)
         total_salary_sum, processed_vacancies_count = 0, 0
         for vacancy in vacancy_list:
-            salary_info = vacancy.get("salary")
-            if not salary_info:
+            salary_details = vacancy.get("salary")
+            if not salary_details:
                 continue
             predicted_salary = predict_rub_salary(
-                salary_info.get("from"),
-                salary_info.get("to"),
-                salary_info.get("currency")
+                salary_details.get("from"),
+                salary_details.get("to"),
+                salary_details.get("currency")
             )
             if predicted_salary:
                 total_salary_sum += predicted_salary
@@ -95,19 +96,19 @@ def get_hh_statistics(languages):
     return statistics
 
 
-def get_superjob_vacancies(search_query, SUPERJOB_API_KEY, SUPERJOB_URL, town_id=4, vacancies_count=100, page=0):
+def get_superjob_vacancies(search_query, town_id=4, vacancies_count=100, page=0):
     headers = {"X-Api-App-Id": SUPERJOB_API_KEY, "User-Agent": "Mozilla/5.0"}
     params = {"keyword": search_query, "town": town_id, "count": vacancies_count, "page": page}
     resp = requests.get(SUPERJOB_URL, headers=headers, params=params)
     resp.raise_for_status()
     return resp.json()
 
-def get_all_superjob_vacancies(search_query, SUPERJOB_API_KEY, SUPERJOB_URL, town_id=4, vacancies_count=100):
+def get_all_superjob_vacancies(search_query, town_id=4, vacancies_count=100):
     page = 0
     all_objects = []
     total_found = 0
     while True:
-        page_data = get_superjob_vacancies(search_query, SUPERJOB_API_KEY, SUPERJOB_URL, town_id=town_id, vacancies_count=vacancies_count, page=page)
+        page_data = get_superjob_vacancies(search_query, town_id=town_id, vacancies_count=vacancies_count, page=page)
         if page == 0:
             total_found = page_data.get("total", 0)
         objects = page_data.get("objects", [])
@@ -119,29 +120,29 @@ def get_all_superjob_vacancies(search_query, SUPERJOB_API_KEY, SUPERJOB_URL, tow
         page += 1
     return {"total": total_found, "objects": all_objects}
 
-def get_all_superjob_vacancies_multi(queries, SUPERJOB_API_KEY, SUPERJOB_URL, town_id=4, vacancies_count=100):
-    combined_objects = []
+def get_all_superjob_vacancies_multi(queries, town_id=4, vacancies_count=100):
+    merged_vacancies = []
     seen_ids = set()
     total_found_sum = 0
-    for q in queries:
-        data = get_all_superjob_vacancies(q, SUPERJOB_API_KEY, SUPERJOB_URL, town_id=town_id, vacancies_count=vacancies_count)
-        total_found_sum += data.get("total", 0)
-        for obj in data.get("objects", []):
-            vid = obj.get("id")
-            if vid not in seen_ids:
-                seen_ids.add(vid)
-                combined_objects.append(obj)
-    return {"total": total_found_sum, "objects": combined_objects}
+    for search_query in queries:
+        superjob_page_result = get_all_superjob_vacancies(search_query, town_id=town_id, vacancies_count=vacancies_count)
+        total_found_sum += superjob_page_result.get("total", 0)
+        for vacancy in superjob_page_result.get("objects", []):
+            vacancy_id = vacancy.get("id")
+            if vacancy_id not in seen_ids:
+                seen_ids.add(vacancy_id)
+                merged_vacancies.append(vacancy)
+    return {"total": total_found_sum, "objects": merged_vacancies}
 
-def get_superjob_statistics(languages, SUPERJOB_API_KEY, SUPERJOB_URL):
+def get_superjob_statistics(languages):
     stats = {}
     for language in languages:
         queries = LANGUAGE_ALIASES.get(language, [language])
-        vacancies_data = get_all_superjob_vacancies_multi(queries, SUPERJOB_API_KEY, SUPERJOB_URL)
+        vacancies_data = get_all_superjob_vacancies_multi(queries)
         total_found = vacancies_data.get("total", 0)
-        vacancy_list = vacancies_data.get("objects", [])
+        vacancies = vacancies_data.get("objects", [])
         total_salary_sum, processed_vacancies_count = 0, 0
-        for vacancy in vacancy_list:
+        for vacancy in vacancies:
             predicted_salary = predict_rub_salary(
                 vacancy.get("payment_from"),
                 vacancy.get("payment_to"),
@@ -179,14 +180,11 @@ def print_statistics_table(statistics_data, title="Job Stats"):
     table = SingleTable(table_rows, title)
     print(table.table)
 
-
 def main():
-    SUPERJOB_API_KEY = os.getenv("API_SUPERJOB_KEY")
-    SUPERJOB_URL = "https://api.superjob.ru/2.0/vacancies/"
     programming_languages = ["Python", "Java", "C#", "Go", "JavaScript", "1C"]
     hh_statistics = get_hh_statistics(programming_languages)
     print_statistics_table(hh_statistics, title="HeadHunter Moscow")
-    sj_statistics = get_superjob_statistics(programming_languages, SUPERJOB_API_KEY, SUPERJOB_URL)
+    sj_statistics = get_superjob_statistics(programming_languages)
     print_statistics_table(
         sj_statistics,
         title="SuperJob Moscow"
